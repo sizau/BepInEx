@@ -89,11 +89,11 @@ internal class WindowsConsoleDriver : IConsoleDriver
     {
         ConsoleWindow.Attach();
 
-        // Make sure of ConsoleEncoding helper class because on some Monos
-        // Encoding.GetEncoding throws NotImplementedException on most codepages
-        // NOTE: We don't set Console.OutputEncoding because it resets any existing Console.Out writers
-        if (!useManagedEncoder)
-            ConsoleEncoding.ConsoleCodePage = codepage;
+        // Always align OS console output code page with selected log encoding.
+        // Otherwise managed UTF-8 writers can still be decoded with legacy code page by conhost,
+        // resulting in garbled non-ASCII text (e.g. CJK Unity logs).
+        // NOTE: We don't set Console.OutputEncoding because it resets existing Console.Out writers.
+        ConsoleEncoding.ConsoleCodePage = codepage;
 
         // If stdout exists, write to it, otherwise make it the same as console out
         // Not sure if this is needed? Does the original Console.Out still work?

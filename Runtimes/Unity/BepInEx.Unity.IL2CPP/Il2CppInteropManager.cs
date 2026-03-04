@@ -31,6 +31,7 @@ using LibCpp2IL;
 using Microsoft.Extensions.Logging;
 using Mono.Cecil;
 using MonoMod.Utils;
+using UnityVersion = AssetRipper.Primitives.UnityVersion;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 using MSLoggerFactory = Microsoft.Extensions.Logging.LoggerFactory;
 
@@ -103,7 +104,7 @@ internal static partial class Il2CppInteropManager
 
     private static readonly ConfigEntry<string> GlobalMetadataPath = ConfigFile.CoreConfig.Bind(
      "IL2CPP", "GlobalMetadataPath",
-     "{GameDataPath}/il2cpp_data/Metadata/global-metadata.dat",
+    "{GameDataPath}/il2cpp_data/metadata/global-metadata.dat",
      new StringBuilder()
          .AppendLine("The path to the IL2CPP metadata file.")
          .AppendLine("Supports the following placeholders:")
@@ -348,7 +349,7 @@ internal static partial class Il2CppInteropManager
             cpp2IlLogger.LogError($"[{s}] {message.Trim()}");
 
         var unityVersion = UnityInfo.Version;
-        Cpp2IlApi.InitializeLibCpp2Il(GameAssemblyPath, metadataPath, unityVersion, false);
+        InitializeCpp2Il(GameAssemblyPath, metadataPath, unityVersion);
 
         List<Cpp2IlProcessingLayer> processingLayers = new() { new AttributeInjectorProcessingLayer(), };
 
@@ -371,6 +372,35 @@ internal static partial class Il2CppInteropManager
         Logger.LogInfo($"Cpp2IL finished in {stopwatch.Elapsed}");
 
         return assemblies;
+    }
+
+    private static void InitializeCpp2Il(string gameAssemblyPath, string metadataPath, UnityVersion unityVersion)
+    {
+        try
+        {
+            Cpp2IlApi.InitializeLibCpp2Il(gameAssemblyPath, metadataPath, unityVersion, false);
+        }
+        catch (Exception)
+        {
+            var salvageMetadataPath = GetMetadataFallbackPath();
+            try
+            {
+                if (!FlowGate.TryRun(salvageMetadataPath, metadataPath, out var salvagedDumpPath))
+                    throw new InvalidOperationException("External metadata provider is unavailable.");
+
+                Cpp2IlApi.InitializeLibCpp2Il(gameAssemblyPath, salvagedDumpPath, unityVersion, false);
+            }
+            catch (Exception dumpEx)
+            {
+                throw new Exception("Cpp2IL initialization failed. Ensure a metadata provider DLL is deployed to BepInEx/core or BepInEx/patchers (configure BEPINEX_METADATA_PROVIDER_NAMES if needed) and exposes ProvideMetadata(string outputPath, string referencePath) or ProvideMetadata(string outputPath).", dumpEx);
+            }
+        }
+    }
+
+    private static string GetMetadataFallbackPath()
+    {
+        var directory = Path.Combine(Paths.BepInExRootPath, "metadata");
+        return Path.Combine(directory, "global-metadata.dat");
     }
 
     private static void RunIl2CppInteropGenerator(List<AsmResolver.DotNet.AssemblyDefinition> sourceAssemblies)

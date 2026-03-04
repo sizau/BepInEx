@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using BepInEx.Bootstrap;
@@ -66,7 +67,7 @@ public class IL2CPPChainloader : BaseChainloader<BasePlugin>
         }
 
         var runtimeInvokePtr = NativeLibrary.GetExport(il2CppHandle, "il2cpp_runtime_invoke");
-        PreloaderLogger.Log.Log(LogLevel.Debug, $"Runtime invoke pointer: 0x{runtimeInvokePtr.ToInt64():X}");
+        PreloaderLogger.Log.Log(LogLevel.Debug, $"Runtime invoke pointer: 0x{runtimeInvokePtr:X}");
         RuntimeInvokeDetourDelegate invokeMethodDetour = OnInvokeMethod;
 
         RuntimeInvokeDetour =
@@ -84,12 +85,7 @@ public class IL2CPPChainloader : BaseChainloader<BasePlugin>
             try
             {
                 if (ConfigUnityLogging.Value)
-                {
-                    Logger.Sources.Add(new IL2CPPUnityLogSource());
-
-                    Application.CallLogCallback("Test call after applying unity logging hook", "", LogType.Assert,
-                                                true);
-                }
+                    TryAttachUnityLogger();
 
                 unhook = true;
 
@@ -124,6 +120,36 @@ public class IL2CPPChainloader : BaseChainloader<BasePlugin>
         ChainloaderLogHelper.RewritePreloaderLogs();
 
         Logger.Sources.Add(new IL2CPPLogSource());
+    }
+
+    private static void TryAttachUnityLogger()
+    {
+        const string testMessage = "Test call after applying unity logging hook";
+        try
+        {
+            Logger.Sources.Add(new IL2CPPUnityLogSource());
+            Application.CallLogCallback(testMessage, string.Empty, LogType.Assert, true);
+        }
+        catch (FileNotFoundException fnf) when (IsUnityCoreModuleMissing(fnf))
+        {
+            Logger.Log(LogLevel.Warning, "UnityEngine.CoreModule not found; skipping Unity log hook.");
+        }
+        catch (Exception logEx)
+        {
+            ReportUnityLoggerFailure(logEx);
+        }
+    }
+
+    private static bool IsUnityCoreModuleMissing(FileNotFoundException exception)
+    {
+        return exception.FileName != null &&
+               exception.FileName.Contains("UnityEngine.CoreModule", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ReportUnityLoggerFailure(Exception exception)
+    {
+        Logger.Log(LogLevel.Error, "Failed to hook Unity log callback (Unity compatibility issue)");
+        Logger.Log(LogLevel.Error, exception);
     }
 
     public override BasePlugin LoadPlugin(PluginInfo pluginInfo, Assembly pluginAssembly)

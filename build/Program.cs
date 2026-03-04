@@ -32,12 +32,12 @@ public class BuildContext : FrostingContext
         BleedingEdge
     }
 
-    public const string DoorstopVersion = "4.5.0";
-    public const string DotnetRuntimeVersion = "6.0.7";
-    public const string DobbyVersion = "1.0.5";
+    public const string DOORSTOP_VERSION = "4.5.0";
+    public const string DOTNET_RUNTIME_VERSION = "6.0.7";
+    public const string DOBBY_VERSION = "1.0.5";
 
-    public const string DotnetRuntimeZipUrl =
-        $"https://github.com/BepInEx/dotnet-runtime/releases/download/{DotnetRuntimeVersion}/mini-coreclr-Release.zip";
+    public const string DOTNET_RUNTIME_ZIP_URL =
+        $"https://github.com/BepInEx/dotnet-runtime/releases/download/{DOTNET_RUNTIME_VERSION}/mini-coreclr-Release.zip";
 
     internal readonly DistributionTarget[] Distributions =
     {
@@ -50,9 +50,7 @@ public class BuildContext : FrostingContext
         new("Unity.IL2CPP", "win-x64"),
         new("Unity.IL2CPP", "linux-x64"),
         new("Unity.IL2CPP", "macos-x64"),
-        new("NET.Framework", "win-x86", "net40"),
-        new("NET.Framework", "win-x86", "net452"),
-        new("NET.CoreCLR", "win-x64", "netcoreapp3.1"),
+        new("NET.Framework", "win-x86", "net6.0"),
         new("NET.CoreCLR", "win-x64", "net6.0")
     };
 
@@ -71,6 +69,7 @@ public class BuildContext : FrostingContext
 
         BuildType = ctx.Argument("build-type", ProjectBuildType.Development);
         BuildId = ctx.Argument("build-id", -1);
+        SsiVersion = ctx.Argument("ssi-version", "1");
         LastBuildCommit = ctx.Argument("last-build-commit", "");
         NugetApiKey = ctx.Argument("nuget-api-key", "");
         NugetSource = ctx.Argument("nuget-source", "https://nuget.bepinex.dev/v3/index.json");
@@ -78,6 +77,7 @@ public class BuildContext : FrostingContext
 
     public ProjectBuildType BuildType { get; }
     public int BuildId { get; }
+    public string SsiVersion { get; }
     public string LastBuildCommit { get; }
     public string NugetApiKey { get; }
     public string NugetSource { get; }
@@ -93,7 +93,7 @@ public class BuildContext : FrostingContext
     public string VersionSuffix => BuildType switch
     {
         ProjectBuildType.Release      => "",
-        ProjectBuildType.Development  => "dev",
+        ProjectBuildType.Development  => string.IsNullOrWhiteSpace(SsiVersion) ? "dev" : $"ssi.{SsiVersion}",
         ProjectBuildType.BleedingEdge => $"be.{BuildId}",
         var _                         => throw new ArgumentOutOfRangeException()
     };
@@ -105,12 +105,14 @@ public class BuildContext : FrostingContext
             var _                    => $"-{VersionSuffix}+{this.GitShortenSha(RootDirectory, CurrentCommit)}",
         };
 
-    public static string DoorstopZipUrl(string arch) =>
-        $"https://github.com/NeighTools/UnityDoorstop/releases/download/v{DoorstopVersion}/doorstop_{arch}_release_{DoorstopVersion}.zip";
+    public static string DoorstopZipUrl() =>
+        $"https://github.com/sizau/UnityDoorstop/releases/download/ci/doorstop_all_{DOORSTOP_VERSION}.zip";
 
     public static string DobbyZipUrl(string arch) =>
-        $"https://github.com/BepInEx/Dobby/releases/download/v{DobbyVersion}/dobby-{arch}.zip";
+        $"https://github.com/BepInEx/Dobby/releases/download/v{DOBBY_VERSION}/dobby-{arch}.zip";
+
 }
+
 
 [TaskName("Clean")]
 public sealed class CleanTask : FrostingTask<BuildContext>
@@ -164,24 +166,19 @@ public sealed class DownloadDependenciesTask : FrostingTask<BuildContext>
 
         var cache = new DependencyCache(ctx, ctx.CacheDirectory.CombineWithFilePath("cache.json"));
 
-        cache.Refresh("NeighTools/UnityDoorstop", BuildContext.DoorstopVersion, () =>
+        cache.Refresh("sizau/UnityDoorstop-ci", BuildContext.DOORSTOP_VERSION, () =>
         {
-            ctx.Log.Information($"Downloading Doorstop {BuildContext.DoorstopVersion}");
+            ctx.Log.Information($"Downloading Doorstop {BuildContext.DOORSTOP_VERSION}");
             var doorstopDir = ctx.CacheDirectory.Combine("doorstop");
             ctx.CreateDirectory(doorstopDir);
             ctx.CleanDirectory(doorstopDir);
-            var archs = new[] { "win", "linux", "macos" };
-            var versions = archs
-                           .Select(a => ($"Doorstop ({a})",
-                                         BuildContext.DoorstopZipUrl(a),
-                                         doorstopDir.Combine($"doorstop_{a}")))
-                           .ToArray();
-            ctx.DownloadZipFiles($"Doorstop {BuildContext.DoorstopVersion}", versions);
+            ctx.DownloadZipFiles($"Doorstop {BuildContext.DOORSTOP_VERSION}",
+                                 ("Doorstop (all)", BuildContext.DoorstopZipUrl(), doorstopDir));
         });
 
-        cache.Refresh("BepInEx/Dobby", BuildContext.DobbyVersion, () =>
+        cache.Refresh("BepInEx/Dobby", BuildContext.DOBBY_VERSION, () =>
         {
-            ctx.Log.Information($"Downloading Dobby {BuildContext.DobbyVersion}");
+            ctx.Log.Information($"Downloading Dobby {BuildContext.DOBBY_VERSION}");
             var dobbyDir = ctx.CacheDirectory.Combine("dobby");
             ctx.CreateDirectory(dobbyDir);
             ctx.CleanDirectory(dobbyDir);
@@ -189,17 +186,17 @@ public sealed class DownloadDependenciesTask : FrostingTask<BuildContext>
             var versions = archs
                            .Select(a => ($"Dobby ({a})", BuildContext.DobbyZipUrl(a), dobbyDir.Combine($"dobby_{a}")))
                            .ToArray();
-            ctx.DownloadZipFiles($"Dobby {BuildContext.DobbyVersion}", versions);
+            ctx.DownloadZipFiles($"Dobby {BuildContext.DOBBY_VERSION}", versions);
         });
 
-        cache.Refresh("BepInEx/dotnet_runtime", BuildContext.DotnetRuntimeVersion, () =>
+        cache.Refresh("BepInEx/dotnet_runtime", BuildContext.DOTNET_RUNTIME_VERSION, () =>
         {
-            ctx.Log.Information($"Downloading dotnet runtime {BuildContext.DotnetRuntimeVersion}");
+            ctx.Log.Information($"Downloading dotnet runtime {BuildContext.DOTNET_RUNTIME_VERSION}");
             var dotnetDir = ctx.CacheDirectory.Combine("dotnet");
             ctx.CreateDirectory(dotnetDir);
             ctx.CleanDirectory(dotnetDir);
-            ctx.DownloadZipFiles($"dotnet-runtime {BuildContext.DotnetRuntimeVersion}",
-                                 ("dotnet runtime", BuildContext.DotnetRuntimeZipUrl, dotnetDir));
+            ctx.DownloadZipFiles($"dotnet-runtime {BuildContext.DOTNET_RUNTIME_VERSION}",
+                                 ("dotnet runtime", BuildContext.DOTNET_RUNTIME_ZIP_URL, dotnetDir));
         });
 
         cache.Save();
@@ -246,10 +243,22 @@ public sealed class MakeDistTask : FrostingTask<BuildContext>
 
             var sourceDirectory = ctx.OutputDirectory.Combine(dist.DistributionIdentifier);
             if (dist.FrameworkTarget != null)
-                sourceDirectory = sourceDirectory.Combine(dist.FrameworkTarget);
+            {
+                var frameworkDirectory = sourceDirectory.Combine(dist.FrameworkTarget);
+                if (ctx.DirectoryExists(frameworkDirectory))
+                    sourceDirectory = frameworkDirectory;
+                else
+                    ctx.Log.Warning($"Framework output directory not found for {dist.Target}: {frameworkDirectory.FullPath}. Falling back to {sourceDirectory.FullPath}.");
+            }
 
             foreach (var filePath in ctx.GetFiles(sourceDirectory.Combine("*.*").FullPath))
                 ctx.CopyFileToDirectory(filePath, bepInExCoreDir);
+
+            if (dist.Engine == "Unity" && dist.Runtime == "IL2CPP")
+            {
+                foreach (var filePath in ctx.GetFiles(sourceDirectory.Combine("Metadata.Provider.*").FullPath))
+                    ctx.CopyFileToDirectory(filePath, bepInExCoreDir);
+            }
 
             if (dist.Engine == "Unity")
             {
@@ -284,7 +293,9 @@ public sealed class MakeDistTask : FrostingTask<BuildContext>
             {
                 if (dist.Runtime == "Framework")
                 {
-                    ctx.DeleteFile(bepInExCoreDir.CombineWithFilePath("BepInEx.NET.Framework.Launcher.exe.config"));
+                    var configPath = bepInExCoreDir.CombineWithFilePath("BepInEx.NET.Framework.Launcher.exe.config");
+                    if (ctx.FileExists(configPath))
+                        ctx.DeleteFile(configPath);
 
                     ctx.MoveFileToDirectory(bepInExCoreDir.CombineWithFilePath("BepInEx.NET.Framework.Launcher.exe"), targetDir);
                 }
