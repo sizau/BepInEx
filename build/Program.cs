@@ -105,8 +105,8 @@ public class BuildContext : FrostingContext
             var _                    => $"-{VersionSuffix}+{this.GitShortenSha(RootDirectory, CurrentCommit)}",
         };
 
-    public static string DoorstopZipUrl() =>
-        $"https://github.com/sizau/UnityDoorstop/releases/download/ci/doorstop_all_{DOORSTOP_VERSION}.zip";
+    public static string DoorstopZipUrl(string os) =>
+        $"https://github.com/sizau/UnityDoorstop/releases/download/ci/doorstop_{os}_release_{DOORSTOP_VERSION}.zip";
 
     public static string DobbyZipUrl(string arch) =>
         $"https://github.com/BepInEx/Dobby/releases/download/v{DOBBY_VERSION}/dobby-{arch}.zip";
@@ -172,8 +172,13 @@ public sealed class DownloadDependenciesTask : FrostingTask<BuildContext>
             var doorstopDir = ctx.CacheDirectory.Combine("doorstop");
             ctx.CreateDirectory(doorstopDir);
             ctx.CleanDirectory(doorstopDir);
-            ctx.DownloadZipFiles($"Doorstop {BuildContext.DOORSTOP_VERSION}",
-                                 ("Doorstop (all)", BuildContext.DoorstopZipUrl(), doorstopDir));
+            var oses = new[] { "win", "linux", "macos" };
+            var versions = oses
+                           .Select(os => ($"Doorstop ({os})",
+                                          BuildContext.DoorstopZipUrl(os),
+                                          doorstopDir.Combine($"doorstop_{os}")))
+                           .ToArray();
+            ctx.DownloadZipFiles($"Doorstop {BuildContext.DOORSTOP_VERSION}", versions);
         });
 
         cache.Refresh("BepInEx/Dobby", BuildContext.DOBBY_VERSION, () =>
@@ -213,16 +218,40 @@ public sealed class MakeDistTask : FrostingTask<BuildContext>
         ctx.CreateDirectory(ctx.DistributionDirectory);
         ctx.CleanDirectory(ctx.DistributionDirectory);
 
-        var latestTag = ctx.Git("describe --tags --abbrev=0");
-        var changelog = new StringBuilder()
-                        .AppendLine(
-                                    $"{ctx.Git($"rev-list --count {latestTag}..HEAD")} changes since {latestTag}")
-                        .AppendLine()
-                        .AppendLine("Changelog (excluding merge commits):")
-                        .AppendLine(ctx.Git(
-                                            $"--no-pager log --no-merges --pretty=\"format:* (%h) [%an] %s\" {latestTag}..HEAD",
-                                            Environment.NewLine))
-                        .ToString();
+        string latestTag = null;
+        try
+        {
+            latestTag = ctx.Git("describe --tags --abbrev=0")?.Trim();
+        }
+        catch
+        {
+            latestTag = null;
+        }
+
+        string changelog;
+        if (!string.IsNullOrWhiteSpace(latestTag))
+        {
+            changelog = new StringBuilder()
+                       .AppendLine(
+                                   $"{ctx.Git($"rev-list --count {latestTag}..HEAD")} changes since {latestTag}")
+                       .AppendLine()
+                       .AppendLine("Changelog (excluding merge commits):")
+                       .AppendLine(ctx.Git(
+                                           $"--no-pager log --no-merges --pretty=\"format:* (%h) [%an] %s\" {latestTag}..HEAD",
+                                           Environment.NewLine))
+                       .ToString();
+        }
+        else
+        {
+            changelog = new StringBuilder()
+                       .AppendLine("No git tag found; generating changelog from recent commits.")
+                       .AppendLine()
+                       .AppendLine("Recent commits (excluding merge commits):")
+                       .AppendLine(ctx.Git(
+                                           "--no-pager log --no-merges --pretty=\"format:* (%h) [%an] %s\" -n 50",
+                                           Environment.NewLine))
+                       .ToString();
+        }
 
 
         foreach (var dist in ctx.Distributions)
@@ -267,7 +296,12 @@ public sealed class MakeDistTask : FrostingTask<BuildContext>
                     : ctx.CacheDirectory.Combine("doorstop").Combine($"doorstop_{dist.Os}").Combine(dist.Arch);
                 foreach (var filePath in ctx.GetFiles(doorstopPath.Combine($"*.{dist.DllExtension}").FullPath))
                     ctx.CopyFileToDirectory(filePath, targetDir);
-                ctx.CopyFileToDirectory(doorstopPath.CombineWithFilePath(".doorstop_version"), targetDir);
+                var doorstopVersionPath = doorstopPath.CombineWithFilePath(".doorstop_version");
+                if (ctx.FileExists(doorstopVersionPath))
+                    ctx.CopyFileToDirectory(doorstopVersionPath, targetDir);
+                else
+                    File.WriteAllText(targetDir.CombineWithFilePath(".doorstop_version").FullPath,
+                                      BuildContext.DOORSTOP_VERSION);
                 var (doorstopConfigFile, doorstopConfigDistName) = dist.Os switch
                 {
                     "win" => ($"doorstop_config_{dist.Runtime.ToLower()}.ini",
