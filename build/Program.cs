@@ -218,15 +218,9 @@ public sealed class MakeDistTask : FrostingTask<BuildContext>
         ctx.CreateDirectory(ctx.DistributionDirectory);
         ctx.CleanDirectory(ctx.DistributionDirectory);
 
-        string latestTag = null;
-        try
-        {
-            latestTag = ctx.Git("describe --tags --abbrev=0")?.Trim();
-        }
-        catch
-        {
-            latestTag = null;
-        }
+        var tagsOutput = ctx.Git("tag --list --sort=-creatordate", Environment.NewLine) ?? string.Empty;
+        var latestTag = tagsOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                                  .FirstOrDefault();
 
         string changelog;
         if (!string.IsNullOrWhiteSpace(latestTag))
@@ -331,7 +325,18 @@ public sealed class MakeDistTask : FrostingTask<BuildContext>
                     if (ctx.FileExists(configPath))
                         ctx.DeleteFile(configPath);
 
-                    ctx.MoveFileToDirectory(bepInExCoreDir.CombineWithFilePath("BepInEx.NET.Framework.Launcher.exe"), targetDir);
+                    var launcherCandidates = new[]
+                    {
+                        bepInExCoreDir.CombineWithFilePath("BepInEx.NET.Framework.Launcher.exe"),
+                        bepInExCoreDir.CombineWithFilePath("BepInEx.NET.Framework.Launcher"),
+                        bepInExCoreDir.CombineWithFilePath("BepInEx.NET.Framework.Launcher.dll")
+                    };
+
+                    var launcherPath = launcherCandidates.FirstOrDefault(ctx.FileExists);
+                    if (launcherPath != null)
+                        ctx.MoveFileToDirectory(launcherPath, targetDir);
+                    else
+                        ctx.Log.Warning($"NET.Framework launcher entrypoint not found for {dist.Target}; expected one of: {string.Join(", ", launcherCandidates.Select(p => p.FullPath))}");
                 }
                 else if (dist.Runtime == "CoreCLR")
                 {
